@@ -1,378 +1,429 @@
+const DISCORD_INVITE = "https://discord.gg/srKJbJNxA5";
+
 const SUPABASE_URL = "https://xytdygzwdyhmaruiahex.supabase.co";
 const SUPABASE_KEY = "sb_publishable_2fRZMcHIdLThGDspuez_YA_0Vz074vq";
 
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const kitMeta = {
-  overall: { label: "Overall", icon: "icons/trophy.png" },
-  shieldlessuhc: { label: "Shieldless UHC", icon: "icons/shieldlessuhc.png" },
-  diamondsmp: { label: "Diamond SMP", icon: "icons/diamondsmp.png" },
-  sword: { label: "Sword", icon: "icons/sword.png" },
-  mace: { label: "Mace", icon: "icons/mace.png" },
-  crystal: { label: "Crystal", icon: "icons/crystal.png" },
-  speed: { label: "Speed", icon: "icons/speed.png" },
-  creeper: { label: "Creeper", icon: "icons/creeper.png" },
+const kits = [
+  { id: "overall", name: "Overall", icon: "icons/trophy.png" },
+  { id: "mace", name: "Mace", icon: "icons/mace.png" },
+  { id: "crystal", name: "Crystal", icon: "icons/crystal.png" },
+  { id: "sword", name: "Sword", icon: "icons/sword.png" },
+  { id: "speed", name: "Speed", icon: "icons/speed.png" },
+  { id: "creeper", name: "Creeper", icon: "icons/creeper.png" },
+  { id: "shieldlessuhc", name: "Shieldless UHC", icon: "icons/shieldlessuhc.png" },
+  { id: "diamondsmp", name: "Diamond SMP", icon: "icons/diamondsmp.png" },
+  { id: "cart", name: "HT Cart", icon: "icons/cart.png" },
+];
+
+const kitOrder = [
+  "mace",
+  "crystal",
+  "creeper",
+  "speed",
+  "cart",
+  "shieldlessuhc",
+  "sword",
+  "diamondsmp",
+];
+
+const tierPoints = {
+  HT1: 60,
+  LT1: 45,
+  HT2: 30,
+  LT2: 20,
+  HT3: 10,
+  LT3: 5,
+  HT4: 4,
+  LT4: 3,
+  HT5: 2,
+  LT5: 1,
 };
 
-let allRows = [];
-let currentFilter = null;
-let currentSearch = "";
+const tierOrder = [
+  "HT1",
+  "LT1",
+  "HT2",
+  "LT2",
+  "HT3",
+  "LT3",
+  "HT4",
+  "LT4",
+  "HT5",
+  "LT5",
+];
 
-/* ---------- HELPERS ---------- */
+const tierGroups = [
+  { label: "Tier 1", tiers: ["HT1", "LT1"], className: "t1" },
+  { label: "Tier 2", tiers: ["HT2", "LT2"], className: "t2" },
+  { label: "Tier 3", tiers: ["HT3", "LT3"], className: "t3" },
+  { label: "Tier 4", tiers: ["HT4", "LT4"], className: "t4" },
+  { label: "Tier 5", tiers: ["HT5", "LT5"], className: "t5" },
+];
 
-function getHead(name, size = 64) {
-  return `https://mc-heads.net/avatar/${encodeURIComponent(name)}/${size}`;
+let activeKit = "overall";
+let players = [];
+
+function normalizeGamemode(value) {
+  if (!value) return null;
+
+  const clean = String(value)
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]/g, "");
+
+  const map = {
+    mace: "mace",
+    crystal: "crystal",
+    sword: "sword",
+    speed: "speed",
+    creeper: "creeper",
+    shieldlessuhc: "shieldlessuhc",
+    uhc: "shieldlessuhc",
+    diamondsmp: "diamondsmp",
+    diamond: "diamondsmp",
+    smp: "diamondsmp",
+    cart: "cart",
+    htcart: "cart",
+    cartht: "cart",
+  };
+
+  return map[clean] || null;
 }
 
-function getNameMC(name) {
-  return `https://namemc.com/profile/${encodeURIComponent(name)}`;
+function blankTiers() {
+  return {
+    mace: null,
+    crystal: null,
+    sword: null,
+    speed: null,
+    creeper: null,
+    shieldlessuhc: null,
+    diamondsmp: null,
+    cart: null,
+  };
 }
 
-function getNameClass(name) {
-  const n = (name || "").toLowerCase();
-  if (n === "freddywjx" || n === "gothevaxx") return "name-freddywjx";
-  if (n === "martinmorty") return "name-martinmorty";
-  return "";
-}
+async function loadPlayers() {
+  const app = document.getElementById("app");
 
-function getTierColor(tier) {
-  if (!tier) return "tier-color-5";
-  const n = tier.match(/[1-5]/)?.[0];
-  return `tier-color-${n || 5}`;
-}
+  if (!window.supabase) {
+    app.innerHTML = `<div class="error">Supabase script did not load.</div>`;
+    return;
+  }
 
-function isHighTier(tier) {
-  return typeof tier === "string" && tier.startsWith("HT");
-}
+  const { data, error } = await db
+    .from("Players")
+    .select("id, username, ign, tier, tier_value, gamemode, points");
 
-function getPrettyKitName(key) {
-  return kitMeta[key]?.label || key;
-}
+  if (error) {
+    console.error(error);
+    app.innerHTML = `<div class="error">Supabase failed: ${error.message}</div>`;
+    return;
+  }
 
-function getRankTitle(rank) {
-  if (rank === 1) return "Combat Grandmaster";
-  if (rank === 2) return "Combat Master";
-  if (rank === 3) return "Combat God";
-  if (rank <= 10) return "Combat Ace";
-  if (rank <= 100) return "Combat Pro";
-  return "Ranked Player";
-}
+  const grouped = {};
 
-function getRankClass(rank) {
-  if (rank === 1) return "rank-1";
-  if (rank === 2) return "rank-2";
-  if (rank === 3) return "rank-3";
-  return "rank-default";
-}
+  for (const row of data || []) {
+    const gm = normalizeGamemode(row.gamemode);
+    const tier = String(row.tier || "").toUpperCase();
+    const ign = row.ign || row.username;
 
-function escapeHtml(v) {
-  return String(v ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
+    if (!gm || !ign || !tierPoints[tier]) continue;
 
-/* ---------- DATA ---------- */
+    const key = String(ign).toLowerCase();
 
-function aggregate(data) {
-  const map = {};
-
-  data.forEach(r => {
-    const key = r.ign || r.username || r.id;
-
-    if (!map[key]) {
-      map[key] = {
-        ign: r.ign || r.username || "Unknown",
-        username: r.username || "Unknown",
-        points: 0,
-        kits: {},
+    if (!grouped[key]) {
+      grouped[key] = {
+        ign,
+        discord: row.username || ign,
+        tiers: blankTiers(),
       };
     }
 
-    map[key].points += Number(r.points || 0);
+    grouped[key].tiers[gm] = tier;
+  }
 
-    map[key].kits[r.gamemode] = {
-      tier: r.tier || "Unranked",
-      points: Number(r.points || 0),
-      tier_value: Number(r.tier_value || 0),
-    };
-  });
-
-  const arr = Object.values(map).sort((a, b) => b.points - a.points);
-  arr.forEach((p, i) => {
-    p.rank = i + 1;
-  });
-  return arr;
+  players = Object.values(grouped);
+  render();
 }
 
-function getPlayerByIgn(ign) {
-  return aggregate(allRows).find(p => p.ign === ign) || null;
+function head(ign) {
+  return `https://mc-heads.net/avatar/${encodeURIComponent(ign)}`;
 }
 
-/* ---------- MODAL ---------- */
+function body(ign) {
+  return `https://mc-heads.net/body/${encodeURIComponent(ign)}/right`;
+}
 
-const modal = document.getElementById("playerModalOverlay");
-const modalContent = document.getElementById("playerModalContent");
-const modalCloseBtn = document.getElementById("modalCloseBtn");
+function namemc(ign) {
+  return `https://namemc.com/profile/${encodeURIComponent(ign)}`;
+}
 
-function openModal(player) {
-  if (!player) return;
+function points(player) {
+  return Object.values(player.tiers).reduce((sum, tier) => {
+    return sum + (tierPoints[tier] || 0);
+  }, 0);
+}
 
-  const kits = Object.entries(player.kits)
-    .sort((a, b) => (b[1].tier_value || 0) - (a[1].tier_value || 0))
-    .map(([k, v]) => `
-      <div class="modal-kit" data-tooltip="${escapeHtml(`${getPrettyKitName(k)} • ${v.tier} • ${v.points} pts`)}">
-        <img src="${kitMeta[k]?.icon || ""}" alt="${escapeHtml(getPrettyKitName(k))}">
-        <div class="modal-kit-tier ${getTierColor(v.tier)}">${escapeHtml(v.tier)}</div>
+function sortedPlayers() {
+  return [...players].sort((a, b) => {
+    return points(b) - points(a) || a.ign.localeCompare(b.ign);
+  });
+}
+
+function tierClass(tier) {
+  if (!tier) return "";
+  if (tier.endsWith("1")) return "t1";
+  if (tier.endsWith("2")) return "t2";
+  if (tier.endsWith("3")) return "t3";
+  if (tier.endsWith("4")) return "t4";
+  if (tier.endsWith("5")) return "t5";
+  return "";
+}
+
+function tierLevelClass(tier) {
+  if (!tier) return "";
+  return tier.startsWith("HT") ? "high-tier" : "low-tier";
+}
+
+function nameClass(ign) {
+  const n = String(ign).toLowerCase();
+
+  if (n === "freddywjx" || n === "gothevaxx") return "name-gradient";
+  if (n === "limoxan") return "name-pink";
+  if (n === "xpyw") return "name-green";
+  if (n === "martinmorty") return "name-green-glow";
+
+  return "";
+}
+
+function kitTooltip(kit, tier) {
+  if (!tier) return `${kit.name}: Unranked (0 points)`;
+  return `${kit.name}: ${tier} (${tierPoints[tier]} points)`;
+}
+
+function sortedKitIdsForPlayer(player) {
+  const ranked = kitOrder
+    .filter(id => player.tiers[id])
+    .sort((a, b) => {
+      const tierA = tierOrder.indexOf(player.tiers[a]);
+      const tierB = tierOrder.indexOf(player.tiers[b]);
+      return tierA - tierB;
+    });
+
+  const unranked = kitOrder.filter(id => !player.tiers[id]);
+
+  return [...ranked, ...unranked];
+}
+
+function miniTiers(player) {
+  return sortedKitIdsForPlayer(player).map(id => {
+    const kit = kits.find(k => k.id === id);
+    const tier = player.tiers[id];
+
+    return `
+      <div class="mini-tier" title="${kitTooltip(kit, tier)}">
+        <img class="${tier ? "" : "unranked-icon"}" src="${kit.icon}" alt="${kit.name}">
+        ${tier ? `<span class="badge ${tierClass(tier)}">${tier}</span>` : `<span class="badge">—</span>`}
       </div>
-    `).join("");
+    `;
+  }).join("");
+}
 
-  modalContent.innerHTML = `
-    <div class="modal-top">
-      <img src="${getHead(player.ign, 128)}" class="modal-head" alt="Player skin">
-      <div id="playerModalTitle" class="modal-name ${getNameClass(player.ign)}">${escapeHtml(player.ign)}</div>
+function safeIgn(ign) {
+  return String(ign).replaceAll("'", "\\'");
+}
 
-      <div class="modal-actions">
-        <a href="${getNameMC(player.ign)}" target="_blank" rel="noopener noreferrer" class="namemc-btn">
-          NameMC
-        </a>
+function renderShell(content) {
+  document.getElementById("app").innerHTML = `
+    <section class="top">
+      <div class="top-links">
+        <a class="discord-btn" href="${DISCORD_INVITE}" target="_blank">Discord</a>
+        <a class="test-link" href="${DISCORD_INVITE}" target="_blank">← Tier test here!</a>
       </div>
-    </div>
 
-    <div class="modal-section">
-      <div class="modal-section-title">POSITION</div>
-      <div class="modal-rank-box">
-        <div class="modal-rank-number ${getRankClass(player.rank)}">#${player.rank}</div>
-        <div class="modal-rank-text">${player.points} points</div>
+      <h1 class="title">EvaXTiers</h1>
+      <p class="subtitle">Minecraft PvP Tierlist</p>
+
+      <div class="tabs">
+        ${kits.map(kit => `
+          <button class="tab ${activeKit === kit.id ? "active" : ""}" onclick="setKit('${kit.id}')" title="${kit.name}">
+            <img src="${kit.icon}" alt="${kit.name}">
+          </button>
+        `).join("")}
       </div>
-    </div>
+    </section>
 
-    <div class="modal-section">
-      <div class="modal-section-title">TIERS</div>
-      <div class="modal-kits">
-        ${kits}
+    ${content}
+
+    <div id="modal" class="modal" onclick="modalClick(event)">
+      <div class="modal-box">
+        <button class="close" onclick="closeModal()">×</button>
+        <div id="modalContent"></div>
       </div>
     </div>
   `;
 
-  modal.classList.add("open");
-  modal.setAttribute("aria-hidden", "false");
-}
+  const search = document.getElementById("search");
+  if (search) {
+    search.addEventListener("keydown", event => {
+      if (event.key !== "Enter") return;
 
-function closeModal() {
-  modal.classList.remove("open");
-  modal.setAttribute("aria-hidden", "true");
-}
+      const q = search.value.trim().toLowerCase();
+      if (!q) return;
 
-modalCloseBtn.addEventListener("click", closeModal);
+      const found = players.find(player =>
+        player.ign.toLowerCase() === q ||
+        String(player.discord).toLowerCase() === q
+      );
 
-modal.addEventListener("click", e => {
-  if (e.target === modal) closeModal();
-});
-
-document.addEventListener("keydown", e => {
-  if (e.key === "Escape") closeModal();
-});
-
-/* ---------- UI ---------- */
-
-function renderKits() {
-  const el = document.getElementById("kits");
-  el.innerHTML = "";
-
-  Object.entries(kitMeta).forEach(([k, v]) => {
-    const btn = document.createElement("button");
-    btn.className = `kit-btn ${((!currentFilter && k === "overall") || currentFilter === k) ? "active" : ""}`;
-    btn.title = v.label;
-    btn.innerHTML = `<img src="${v.icon}" class="kit-nav-icon" alt="${escapeHtml(v.label)}">`;
-
-    btn.addEventListener("click", () => {
-      currentFilter = k === "overall" ? null : k;
-      const search = document.getElementById("playerSearch");
-      if (currentFilter) {
-        currentSearch = "";
-        search.value = "";
-      }
-      render();
+      if (found) openModal(found.ign);
+      else alert("Player not found.");
     });
-
-    el.appendChild(btn);
-  });
-}
-
-function setupSearch(players) {
-  const input = document.getElementById("playerSearch");
-  input.style.display = currentFilter ? "none" : "block";
-
-  if (input.dataset.bound === "1") return;
-  input.dataset.bound = "1";
-
-  input.addEventListener("keydown", e => {
-    if (e.key === "Enter") {
-      currentSearch = e.target.value.trim().toLowerCase();
-      render();
-    }
-  });
-
-  input.addEventListener("input", e => {
-    if (!e.target.value.trim()) {
-      currentSearch = "";
-      render();
-    }
-  });
-}
-
-function renderOverall(players) {
-  const board = document.getElementById("leaderboard");
-  board.innerHTML = "";
-
-  const shownPlayers = currentSearch
-    ? players.filter(p =>
-        p.ign.toLowerCase() === currentSearch ||
-        p.username.toLowerCase() === currentSearch
-      )
-    : players;
-
-  if (!shownPlayers.length) {
-    board.innerHTML = `<div class="empty">No player found</div>`;
-    return;
   }
-
-  shownPlayers.forEach(p => {
-    const kits = Object.entries(p.kits)
-      .sort((a, b) => (b[1].tier_value || 0) - (a[1].tier_value || 0))
-      .map(([k, v]) => `
-        <div class="player-kit-box" data-tooltip="${escapeHtml(`${getPrettyKitName(k)} • ${v.tier} • ${v.points} pts`)}">
-          <img src="${kitMeta[k]?.icon || ""}" alt="${escapeHtml(getPrettyKitName(k))}">
-          <div class="player-kit-tier ${getTierColor(v.tier)}">${escapeHtml(v.tier)}</div>
-        </div>
-      `).join("");
-
-    const div = document.createElement("div");
-    div.className = "player-card";
-    div.innerHTML = `
-      <div class="rank-block">
-        <div class="rank ${getRankClass(p.rank)}">#${p.rank}</div>
-        <div class="title">${escapeHtml(getRankTitle(p.rank))}</div>
-      </div>
-
-      <div class="player-main-with-head">
-        <img src="${getHead(p.ign, 64)}" class="player-head" alt="${escapeHtml(p.ign)}">
-        <div class="player-text">
-          <div class="ign ${getNameClass(p.ign)}">${escapeHtml(p.ign)}</div>
-          <div class="username">@${escapeHtml(p.username)}</div>
-        </div>
-      </div>
-
-      <div class="points">
-        <div class="points-value">${p.points}</div>
-        <div class="points-label">Points</div>
-      </div>
-
-      <div class="kit-icon-row">${kits}</div>
-    `;
-
-    div.addEventListener("click", () => openModal(p));
-    board.appendChild(div);
-  });
 }
 
-function renderTier(rows) {
-  const board = document.getElementById("leaderboard");
-  board.innerHTML = "";
+function renderOverall() {
+  const ranked = sortedPlayers();
 
-  const tiers = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+  renderShell(`
+    <div class="leader-head">
+      <h2>Overall Leaderboard</h2>
+      <input id="search" class="search" placeholder="Search IGN... press Enter">
+    </div>
 
-  rows.forEach(r => {
-    const n = r.tier?.match(/[1-5]/)?.[0];
-    if (n) tiers[n].push(r);
-  });
-
-  Object.values(tiers).forEach(list => {
-    list.sort((a, b) => Number(b.tier_value || 0) - Number(a.tier_value || 0));
-  });
-
-  const wrap = document.createElement("div");
-  wrap.className = "tier-board";
-
-  for (let i = 1; i <= 5; i++) {
-    const col = document.createElement("div");
-    col.className = "tier-column";
-
-    col.innerHTML = `
-      <div class="tier-header">Tier ${i}</div>
-      <div class="tier-list"></div>
-    `;
-
-    const list = col.querySelector(".tier-list");
-
-    if (!tiers[i].length) {
-      list.innerHTML = `<div class="empty-tier">No players</div>`;
-    } else {
-      tiers[i].forEach(p => {
-        const row = document.createElement("div");
-        row.className = `tier-player ${isHighTier(p.tier) ? "high-tier-card" : "low-tier-card"}`;
-        row.setAttribute("data-tooltip", `${getPrettyKitName(p.gamemode)} • ${p.tier} • ${p.points} pts`);
-
-        row.innerHTML = `
-          <div class="tier-player-left">
-            <img src="${getHead(p.ign, 32)}" class="tier-player-icon" alt="${escapeHtml(p.ign)}">
-            <span class="tier-player-name ${getNameClass(p.ign)}">${escapeHtml(p.ign)}</span>
+    <section class="rows">
+      ${ranked.map((player, index) => `
+        <div class="row" onclick="openModal('${safeIgn(player.ign)}')">
+          <div class="rank ${index === 0 ? "top1" : index === 1 ? "top2" : index === 2 ? "top3" : ""}">
+            #${index + 1}
           </div>
-          <div class="tier-player-right">${isHighTier(p.tier) ? "⟰" : "⟱"}</div>
-        `;
 
-        row.addEventListener("click", () => {
-          const fullPlayer = getPlayerByIgn(p.ign);
-          if (fullPlayer) openModal(fullPlayer);
-        });
+          <img class="head" src="${head(player.ign)}" alt="${player.ign}">
 
-        list.appendChild(row);
+          <div>
+            <div class="name ${nameClass(player.ign)}">${player.ign}</div>
+            <div class="discord">@${player.discord}</div>
+          </div>
+
+          <div class="points">${points(player)}<span>points</span></div>
+
+          <div class="row-icons">
+            ${miniTiers(player)}
+          </div>
+        </div>
+      `).join("")}
+    </section>
+  `);
+}
+
+function renderKit(kitId) {
+  const kit = kits.find(k => k.id === kitId);
+
+  const columns = tierGroups.map(group => {
+    const list = [...players]
+      .filter(player => group.tiers.includes(player.tiers[kitId]))
+      .sort((a, b) => {
+        const tierA = tierOrder.indexOf(a.tiers[kitId]);
+        const tierB = tierOrder.indexOf(b.tiers[kitId]);
+        return tierA - tierB || points(b) - points(a) || a.ign.localeCompare(b.ign);
       });
-    }
 
-    wrap.appendChild(col);
-  }
+    return `
+      <div class="tier-col">
+        <h3 class="${group.className}">${group.label}</h3>
+        ${
+          list.length
+            ? list.map(player => {
+              const tier = player.tiers[kitId];
 
-  board.appendChild(wrap);
+              return `
+                <div class="tier-player ${tierLevelClass(tier)}" onclick="openModal('${safeIgn(player.ign)}')" title="${kitTooltip(kit, tier)}">
+                  <img src="${head(player.ign)}" alt="${player.ign}">
+                  <span class="${nameClass(player.ign)}">${player.ign}</span>
+                  <span class="badge ${tierClass(tier)}">${tier}</span>
+                </div>
+              `;
+            }).join("")
+            : `<div class="empty">—</div>`
+        }
+      </div>
+    `;
+  }).join("");
+
+  renderShell(`
+    <h2 class="kit-title">
+      <img src="${kit.icon}" width="34" style="vertical-align:middle;margin-right:10px;">
+      ${kit.name}
+    </h2>
+
+    <section class="tier-board">
+      ${columns}
+    </section>
+  `);
+}
+
+function setKit(kitId) {
+  activeKit = kitId;
+  render();
 }
 
 function render() {
-  renderKits();
-
-  const players = aggregate(allRows);
-  setupSearch(players);
-
-  const title = document.getElementById("sectionTitle");
-  title.textContent = currentFilter ? `${getPrettyKitName(currentFilter)} Tiers` : "Overall Leaderboard";
-
-  if (currentFilter) {
-    renderTier(allRows.filter(r => r.gamemode === currentFilter));
-  } else {
-    renderOverall(players);
+  if (!players.length) {
+    renderShell(`<div class="error">No valid player rows found in Supabase.</div>`);
+    return;
   }
+
+  if (activeKit === "overall") renderOverall();
+  else renderKit(activeKit);
 }
 
-/* ---------- INIT ---------- */
-
-async function init() {
-  try {
-    const { data, error } = await supabaseClient.from("Players").select("*");
-
-    if (error) {
-      console.error(error);
-      document.getElementById("leaderboard").innerHTML = `<div class="empty">Failed to load data</div>`;
-      return;
-    }
-
-    allRows = data || [];
-    render();
-  } catch (err) {
-    console.error(err);
-    document.getElementById("leaderboard").innerHTML = `<div class="empty">Something went wrong</div>`;
-  }
+function overallRank(player) {
+  return sortedPlayers().findIndex(p => p.ign.toLowerCase() === player.ign.toLowerCase()) + 1;
 }
 
-init();
+function openModal(ign) {
+  const player = players.find(p => p.ign.toLowerCase() === String(ign).toLowerCase());
+  if (!player) return;
+
+  document.getElementById("modalContent").innerHTML = `
+    <img class="modal-body" src="${body(player.ign)}" alt="${player.ign}">
+    <div class="modal-name ${nameClass(player.ign)}">${player.ign}</div>
+
+    <a class="namemc" href="${namemc(player.ign)}" target="_blank">
+      View on NameMC
+    </a>
+
+    <div class="modal-rank">
+      #${overallRank(player)} Overall · ${points(player)} points
+    </div>
+
+    <div class="modal-kits">
+      ${sortedKitIdsForPlayer(player).map(id => {
+        const kit = kits.find(k => k.id === id);
+        const tier = player.tiers[id];
+
+        return `
+          <div class="modal-kit" title="${kitTooltip(kit, tier)}">
+            <img class="${tier ? "" : "unranked-icon"}" src="${kit.icon}" alt="${kit.name}">
+            <span class="${tierClass(tier)}">${tier || "—"}</span>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+
+  document.getElementById("modal").classList.add("active");
+}
+
+function closeModal() {
+  document.getElementById("modal").classList.remove("active");
+}
+
+function modalClick(event) {
+  if (event.target.id === "modal") closeModal();
+}
+
+loadPlayers();
