@@ -3,7 +3,7 @@ const DISCORD_INVITE = "https://discord.gg/srKJbJNxA5";
 const SUPABASE_URL = "https://xytdygzwdyhmaruiahex.supabase.co";
 const SUPABASE_KEY = "sb_publishable_2fRZMcHIdLThGDspuez_YA_0Vz074vq";
 
-const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+let db = null;
 
 const kits = [
   { id: "overall", name: "Overall", icon: "icons/trophy.png" },
@@ -17,42 +17,17 @@ const kits = [
   { id: "cart", name: "HT Cart", icon: "icons/cart.png" },
 ];
 
-const kitOrder = [
-  "mace",
-  "crystal",
-  "creeper",
-  "speed",
-  "cart",
-  "shieldlessuhc",
-  "sword",
-  "diamondsmp",
-];
+const kitOrder = ["mace", "crystal", "creeper", "speed", "cart", "shieldlessuhc", "sword", "diamondsmp"];
 
 const tierPoints = {
-  HT1: 60,
-  LT1: 45,
-  HT2: 30,
-  LT2: 20,
-  HT3: 10,
-  LT3: 5,
-  HT4: 4,
-  LT4: 3,
-  HT5: 2,
-  LT5: 1,
+  HT1: 60, LT1: 45,
+  HT2: 30, LT2: 20,
+  HT3: 10, LT3: 5,
+  HT4: 4, LT4: 3,
+  HT5: 2, LT5: 1,
 };
 
-const tierOrder = [
-  "HT1",
-  "LT1",
-  "HT2",
-  "LT2",
-  "HT3",
-  "LT3",
-  "HT4",
-  "LT4",
-  "HT5",
-  "LT5",
-];
+const tierOrder = ["HT1", "LT1", "HT2", "LT2", "HT3", "LT3", "HT4", "LT4", "HT5", "LT5"];
 
 const tierGroups = [
   { label: "Tier 1", tiers: ["HT1", "LT1"], className: "t1" },
@@ -68,10 +43,7 @@ let players = [];
 function normalizeGamemode(value) {
   if (!value) return null;
 
-  const clean = String(value)
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]/g, "");
+  const clean = String(value).toLowerCase().trim().replace(/[^a-z0-9]/g, "");
 
   const map = {
     mace: "mace",
@@ -107,11 +79,6 @@ function blankTiers() {
 
 async function loadPlayers() {
   const app = document.getElementById("app");
-
-  if (!window.supabase) {
-    app.innerHTML = `<div class="error">Supabase script did not load.</div>`;
-    return;
-  }
 
   const { data, error } = await db
     .from("Players")
@@ -162,15 +129,11 @@ function namemc(ign) {
 }
 
 function points(player) {
-  return Object.values(player.tiers).reduce((sum, tier) => {
-    return sum + (tierPoints[tier] || 0);
-  }, 0);
+  return Object.values(player.tiers).reduce((sum, tier) => sum + (tierPoints[tier] || 0), 0);
 }
 
 function sortedPlayers() {
-  return [...players].sort((a, b) => {
-    return points(b) - points(a) || a.ign.localeCompare(b.ign);
-  });
+  return [...players].sort((a, b) => points(b) - points(a) || a.ign.localeCompare(b.ign));
 }
 
 function tierClass(tier) {
@@ -207,11 +170,7 @@ function kitTooltip(kit, tier) {
 function sortedKitIdsForPlayer(player) {
   const ranked = kitOrder
     .filter(id => player.tiers[id])
-    .sort((a, b) => {
-      const tierA = tierOrder.indexOf(player.tiers[a]);
-      const tierB = tierOrder.indexOf(player.tiers[b]);
-      return tierA - tierB;
-    });
+    .sort((a, b) => tierOrder.indexOf(player.tiers[a]) - tierOrder.indexOf(player.tiers[b]));
 
   const unranked = kitOrder.filter(id => !player.tiers[id]);
 
@@ -267,6 +226,7 @@ function renderShell(content) {
   `;
 
   const search = document.getElementById("search");
+
   if (search) {
     search.addEventListener("keydown", event => {
       if (event.key !== "Enter") return;
@@ -426,4 +386,14 @@ function modalClick(event) {
   if (event.target.id === "modal") closeModal();
 }
 
-loadPlayers();
+window.addEventListener("DOMContentLoaded", () => {
+  const app = document.getElementById("app");
+
+  if (!window.supabase) {
+    app.innerHTML = `<div class="error">Supabase script failed to load.</div>`;
+    return;
+  }
+
+  db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  loadPlayers();
+});
